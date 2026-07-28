@@ -12,12 +12,18 @@
 # On 2021-05-04, added Benson+21 values of the PCH08 merger tree params
 
 #########################################################################
-
+import os
 import cosmo as co
 
 import numpy as np
 from scipy.interpolate import interp1d, RectBivariateSpline, splrep
 
+import logging
+logging.basicConfig(format='%(asctime)s | %(name)s %(levelname)s: %(message)s', datefmt='%H:%M:%S')
+log = logging.getLogger('config')
+log.setLevel('INFO')
+
+_THIS_DRNAME = os.path.dirname(os.path.abspath(__file__))
 ########################## user control #################################
 
 #---cosmology 
@@ -127,38 +133,44 @@ cosmo = {
                                  # 0=integration, 1=interpolation 
     }
 
-print('>>> Normalizing primordial power spectrum P(k)=(k/k_0)^n_s ...')
 cosmo['k0'] = co.k0(**cosmo)
-print('    such that sigma(R=8Mpc/h) = %8.4f.'%(co.sigmaR(8.,**cosmo)))
+log.info('>>> Normalizing primordial power spectrum P(k)=(k/k_0)^n_s ...')
+log.info('    such that sigma(R=8Mpc/h) = %8.4f.'%(co.sigmaR(8.,**cosmo)))
 
-print('>>> Tabulating sigma(M,z=0) ...')
+log.info('>>> Tabulating sigma(M,z=0) ...')
 lgM_grid  = np.linspace(1.,17.,1000)
 sigma_grid = co.sigma(10.**lgM_grid,z=0.,**cosmo)
 sigmalgM_interp = interp1d(lgM_grid, sigma_grid, kind='linear')
 cosmo['MassVarianceChoice'] = 1 
-print('    From now on, sigma(M,z) is computed by interpolation.')
+log.info('    From now on, sigma(M,z) is computed by interpolation.')
 
-print('>>> Tabulating z(W) and z(t_lkbk)...')
+log.info('>>> Tabulating z(W) and z(t_lkbk)...')
 z_grid  = np.logspace(0.,2.,10000) - 1.0 # uniform in log(1+z)
 W_grid = co.deltac(z_grid,Om)
 zW_interp = interp1d(W_grid, z_grid, kind='linear')
 tlkbk_grid = co.tlkbk(z_grid,h,Om,OL)
 ztlkbk_interp = interp1d(tlkbk_grid, z_grid, kind='linear')
 
-print('>>> Preparing output redshifts for merger trees ...')
+log.info('>>> Preparing output redshifts for merger trees ...')
 Nmax = 500000 # maximum number of branches per tree
-zsample = [z0]
+zsample = [] # DF: remove z0 from zsample as it is now added in during the loop
 dtsample = []
 z = z0
 while z<=zmax:
+
     tlkbk = co.tlkbk(z,h,Om,OL)
     tdyn = co.tdyn(z,h,Om,OL) # NOTE: This uses BN98 for Delta
     dt = min(0.06, 0.1 * tdyn)
-    # NOTE: The above sets the maximum output time step to be 0.06 Gyr
-    z = ztlkbk_interp(tlkbk+dt)
+    
+    # DF: 2024/09/04: move these lines before redefinition of z to prevent zsample[-1] > zmax
     zsample.append(z)
     dtsample.append(dt)
-dtsample.append(0.) # append a zero to the end, making dtsample the same 
+
+    # NOTE: The above sets the maximum output time step to be 0.06 Gyr
+    z = ztlkbk_interp(tlkbk+dt)
+    # zsample.append(z)
+    # dtsample.append(dt)
+# dtsample.append(0.) # append a zero to the end, making dtsample the same 
     # length as zsample
 zsample = np.array(zsample)
 dtsample = np.array(dtsample)
@@ -168,10 +180,10 @@ tsample = co.t(zsample,h,Om,OL)
 Dvsample = co.DeltaBN(zsample,Om,OL)
 Omsample = co.Omega(zsample,Om,OL)
 Nz = len(zsample)
-print('    Number of output redshifts = %4i, up to z = %5.2f'\
+log.info('    Number of output redshifts = %4i, up to z = %5.2f'\
     %(Nz,zsample.max()))
     
-print('>>> Tabulating Parkinson+08 J(u_res) ...')
+log.info('>>> Tabulating Parkinson+08 J(u_res) ...')
 ures_grid = np.logspace(-6.,6.,1000)
 J_grid = co.J_vec(ures_grid)
 Jures_interp = interp1d(ures_grid, J_grid, kind='linear')
@@ -184,12 +196,13 @@ gvdb_fp = np.array([ 3.37821658e-01, -2.21730464e-04,  1.56793984e-01,
                     -3.37271922e-01, -9.91000445e-02,  4.14500861e-01])
 
 # for computing enclosed mass within Green and van den Bosch (2019)
-print('>>> Building interpolation grid for Green+19 M(<r|f_b,c)...')
-print('>>> Building interpolation grid for Green+19 sigma(r|f_b,c)...')
-print('>>> Building interpolation grid for Green+19 d2Phidr2(r|f_b,c)...')
-gvdb_mm = np.load('etc/gvdb_mm.npy')
-gvdb_sm = np.load('etc/gvdb_sm.npy')
-gvdb_pm = np.load('etc/gvdb_pm.npy')
+log.info(">>> Building interpolation grid for Green+19 M(<r|f_b,c)...")
+log.info(">>> Building interpolation grid for Green+19 sigma(r|f_b,c)...")
+log.info(">>> Building interpolation grid for Green+19 d2Phidr2(r|f_b,c)...")
+gvdb_mm = np.load(os.path.join(_THIS_DRNAME, "etc/gvdb_mm.npy"))
+gvdb_sm = np.load(os.path.join(_THIS_DRNAME, "etc/gvdb_sm.npy"))
+gvdb_pm = np.load(os.path.join(_THIS_DRNAME, "etc/gvdb_pm.npy"))
+
 nfb = 100
 nr = 131
 ncs = 30
@@ -229,11 +242,11 @@ for i in range(0, nr):
 # Jiang+15 subhalo orbital model parameters (Table 2)
 # rows correspond to host mass (i.e., peak height)
 # columns correspond to msub/mhost
-print('>>> Building interpolator for Jiang+15 orbit sampler...')
+log.info('>>> Building interpolator for Jiang+15 orbit sampler...')
 ncdf_pts = 100
 V_by_V200c_arr = np.linspace(0., 2.6, ncdf_pts)
 Vr_by_V_arr = np.linspace(0., 1., ncdf_pts)
-jiang_cdfs = np.load('etc/jiang_cdfs.npz')
+jiang_cdfs = np.load(os.path.join(_THIS_DRNAME, "etc/jiang_cdfs.npz"))
 V_by_V200c_cdf = jiang_cdfs['V_by_V200c']
 Vr_by_V_cdf = jiang_cdfs['Vr_by_V']
 
