@@ -4,8 +4,8 @@ A semi-analytical satellite galaxy and dark matter halo generator,
 introduced in [Jiang et al. (2020)](https://arxiv.org/abs/2005.05974), extended in [Green et al. (2021)](https://arxiv.org/abs/2110.13044).
 See these publications for more details.  
 
-This fork extends Sheridan Green's `TreeGen_Sub.py` and 
-`SubEvo.py` scripts, encorporating elements from the original
+This fork extends the SatGen II `TreeGen_Sub.py` and 
+`SubEvo.py` scripts, incorporating elements from the original
 version of SatGen (e.g., tracking stellar masses) and adding
 additional features (e.g., other concentration--mass models).
 
@@ -43,10 +43,10 @@ of three scripts. The general workflow of using SatGen is as follows:
 
 Usage details of my particular implementation follow.
 
-### Tree generation
+### 1. Tree generation
 In this file, one sets the target halo properties (mass and 
 redshift), as well as the resolution of the merger trees.
-This is primarily based on Sheridan Green's [TreeGen_Sub](https://github.com/shergreen/SatGen/blob/master/TreeGen_Sub.py) script,
+This is primarily based on the [TreeGen_Sub](https://github.com/shergreen/SatGen/blob/master/TreeGen_Sub.py) script,
 though I have added elements of the original [TreeGen](https://github.com/shergreen/SatGen/blob/master/TreeGen.py) to populate halos
 with stellar masses.
 
@@ -57,7 +57,7 @@ ease of use with a job scheduler. Of particular interest may be:
 - `SATGEN_SMHMR` -- the stellar mass--halo mass relation to use, passed to `init.Mstar`
 - `SATGEN_CONC` -- the concentration--mass relation to use, either `"zhao"` for [Zhao+09](https://doi.org/10.1088/0004-637X/707/1/354) or passed to [Colossus' `concentration` module](https://bdiemer.bitbucket.io/colossus/halo_concentration.html)
 
-### Satellite evolution
+### 2. Satellite evolution
 In this file, one sets options relevant to the satellite evolution.
 This is primarily based on the companion to TreeGen_Sub, called [SubEvo.](https://github.com/shergreen/SatGen/blob/master/SubEvo.py)
 I have added an implementation for the Milky Way's disk borrowed from 
@@ -67,15 +67,15 @@ As with `GenerateTrees`, I have promoted many of the SatGen options
 to environment variables, including
 - `SATGEN_TREES` -- as above, the location of the merger trees
 - `SATGEN_OUTFOLDER` -- the location of the evolved satellite output
-- `SATGEN_CONC_SCATTER` -- additional scatter (in dex) to add to the concentration--mass relation: this should be zero for the Zhao+09 model, but nonzero for a Colossus model, as the merger tree will contain only the median concentration values.
+- `SATGEN_CONC_SCATTER` -- additional scatter (in dex) to add to the concentration--mass relation: this should be zero for the Zhao+09 model, but nonzero for a Colossus model, as in that case the merger tree will contain only the median concentration values.
 
-### Output processing
+### 3. Output processing
 This file contains scripts for processing individual orbit-evolved 
 files, or for processing entire directories at once. The functions 
 provided reduce the data to `numpy` structured arrays to make it 
 easier to use the output information.
 
-The `read_file` function here may be of particular interest, as it
+The [`read_file` function here](https://github.com/folsomde/SatGen/blob/master/3-ProcessOutput.py#L15-L114) may be of particular interest, as it
 shows how one might extract data of interest from the output files.
 
 These scripts are not as well-documented as the SatGen modules,
