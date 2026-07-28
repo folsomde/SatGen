@@ -12,9 +12,6 @@ import config as cfg
 import numpy as np
 from scipy.integrate import quad
 from scipy.optimize import brentq
-import cosmolopy.distance as cdis
-import cosmolopy.density as cden
-import cosmolopy.constants as cc
 import cosmolopy.perturbation as cper
 
 #########################################################################
