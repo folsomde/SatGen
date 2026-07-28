@@ -16,6 +16,10 @@ import aux as aux
 from scipy.stats import lognorm, expon
 from scipy.interpolate import splrep, splev
 
+from colossus.cosmology import cosmology
+cosmology.setCosmology('SatGen', flat=True, H0=cfg.h * 100, Om0=cfg.Om, Ob0=cfg.Ob, sigma8=cfg.s8, ns=cfg.ns)
+from colossus.halo import concentration as colco
+
 #########################################################################
 
 #---for initial satellite-galaxy stellar size   
@@ -118,7 +122,8 @@ def Mstar(Mv,z=0.,choice='RP17'):
         mu = gh.lgMs_RP17(np.log10(Mv),z)
     if choice=='B13':
         mu = gh.lgMs_B13(np.log10(Mv),z)
-    return np.minimum( cfg.Ob/cfg.Om*Mv, 10.**np.random.normal(mu,0.2) )
+    # return np.minimum( cfg.Ob/cfg.Om*Mv, 10.**np.random.normal(mu,0.2) )
+    return 10.**np.random.normal(mu,0.2) # DF: (3 Sept 2024) allow Mstar to scatter very low
     
 # for drawing the Dekel+ parameters
 
@@ -384,7 +389,22 @@ def c2_fromMAH(Mv,t,version='zhao'):
         
         c_-2 (float)
     """
-    return gh.c2_Zhao09(Mv,t,version)
+    if (version == 'zhao') or (version == 'vdb'):
+        return gh.c2_Zhao09(Mv,t,version)
+    elif version=='DM14':
+        t0 = co.t(0,cfg.h,cfg.Om,cfg.OL)
+        tlkbk = t0 - t
+        z = cfg.ztlkbk_interp(tlkbk)[0] 
+        mu = gh.lgc2_DM14(Mv[0],z)
+        return np.maximum(3., 10.**np.random.normal(mu,0.1) )
+    elif version.lower() in colco.models.keys():
+        t0 = co.t(0,cfg.h,cfg.Om,cfg.OL)
+        tlkbk = t0 - t
+        z = cfg.ztlkbk_interp(tlkbk)[0]
+        M = Mv[0]
+        return colco.concentration(M=M, mdef='vir', z=z, model=version.lower())
+    else:
+        raise NotImplementedError
     
 #---for initializing orbit
 
