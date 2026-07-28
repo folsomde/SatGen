@@ -1,198 +1,82 @@
 # SatGen
 
 A semi-analytical satellite galaxy and dark matter halo generator,
-introduced in Jiang et al. (2020), extended in Green et al. (2021a) and
-Green et al. (2021b).
+introduced in [Jiang et al. (2020)](https://arxiv.org/abs/2005.05974), extended in [Green et al. (2021)](https://arxiv.org/abs/2110.13044).
+See these publications for more details.  
 
-- Installation
+This fork extends Sheridan Green's `TreeGen_Sub.py` and 
+`SubEvo.py` scripts, encorporating elements from the original
+version of SatGen (e.g., tracking stellar masses) and adding
+additional features (e.g., other concentration--mass models).
 
-`git clone https://github.com/shergreen/SatGen.git` to clone the repository.
+SatGen's modules have detailed docstrings, but please feel 
+free to contact either the original authors (Fangzhou Jiang and 
+Sheridan Green) or myself (Dylan Folsom) with questions about
+the model.
 
-Note that `git checkout sheridan` was originally required in order to get the
-version of SatGen from Green et al. (2021a). Now, the `sheridan` branch contains
-the same files as the `master` branch.
+## Model overview
 
-- Model overview
-
-SatGen generates satellite-galaxy populations for host halos of desired 
+SatGen generates satellite galaxy populations for host halos of a desired 
 mass and redshift. It combines halo merger trees, empirical relations for 
-galaxy-halo connection, and analytic prescriptions for tidal effects, 
+the galaxy--halo connection, and analytic prescriptions for tidal effects, 
 dynamical friction, and ram-pressure stripping. It emulates zoom-in 
-cosmological hydrosimulations in certain ways and outperforms simulations
-regarding statistical power and numerical resolution. 
+cosmological hydrodynamical simulations in certain ways and outperforms 
+simulations in its statistical power and numerical resolution. 
 
-- Modules
+### Modules
+- `config.py` -- global variables and user controls 
+- `cosmo.py` -- cosmology- and merger tree-related functions 
+- `profiles.py` -- halo-density-profile classes
+- `init.py` for initializing satellite properties at infall 
+- `galhalo.py` -- aspects of the galaxy--halo connection
+- `orbit.py` -- handles orbit evolution
+- `evolve.py` -- for tidal stripping and structural evolution
 
-profiles.py: halo-density-profile classes, currently supporting NFW 
-profile, Einasto profile, Dekel+ profile, and Miyamoto-Nagai disk
+## Satellite generation
+The above modules provide all the infrastructure needed to generate
+a system of satellites, but I have provided my implementation in a series
+of three scripts. The general workflow of using SatGen is as follows:
 
-orbit.py: orbit class and equation of motion
+1. **Generate Trees** -- this step produces a set of merger trees for the primary host halo, describing the initial conditions of the infalling satellites that build it.
+2. **Evolve Satellites** -- integrate these initial conditions until the present day, accounting for tidal stripping and other dynamical effects.
+3. **Process Output** -- the above process yields data for many timesteps, and it is often helpful to reduce the data to the properties of interest. I have provided a script of mine to do so.
 
-cosmo.py: cosmology-related functions, including an implementation of the
-Parkinson+08 merger tree algorithm 
+Usage details of my particular implementation follow.
 
-config.py: global variables and user controls 
+### Tree generation
+In this file, one sets the target halo properties (mass and 
+redshift), as well as the resolution of the merger trees.
+This is primarily based on Sheridan Green's [TreeGen_Sub](https://github.com/shergreen/SatGen/blob/master/TreeGen_Sub.py) script,
+though I have added elements of the original [TreeGen](https://github.com/shergreen/SatGen/blob/master/TreeGen.py) to populate halos
+with stellar masses.
 
-galhalo.py: galaxy-halo connections
+I have promoted other SatGen options to environment variables for 
+ease of use with a job scheduler. Of particular interest may be:
+- `SATGEN_NUM_TREES` -- the number of merger trees to generate
+- `SATGEN_TREES` -- the output directory for the trees
+- `SATGEN_SMHMR` -- the stellar mass--halo mass relation to use, passed to `init.Mstar`
+- `SATGEN_CONC` -- the concentration--mass relation to use, either `"zhao"` for [Zhao+09](https://doi.org/10.1088/0004-637X/707/1/354) or passed to [Colossus' `concentration` module](https://bdiemer.bitbucket.io/colossus/halo_concentration.html)
 
-init.py: for initializing satellite properties at infall 
+### Satellite evolution
+In this file, one sets options relevant to the satellite evolution.
+This is primarily based on the companion to TreeGen_Sub, called [SubEvo.](https://github.com/shergreen/SatGen/blob/master/SubEvo.py)
+I have added an implementation for the Milky Way's disk borrowed from 
+[the SatEvo script](https://github.com/shergreen/SatGen/blob/master/SatEvo.py), and have options for setting the disk mass and shape.
 
-evolve.py: for mass stripping and structural evolution of satellites
+As with `GenerateTrees`, I have promoted many of the SatGen options
+to environment variables, including
+- `SATGEN_TREES` -- as above, the location of the merger trees
+- `SATGEN_OUTFOLDER` -- the location of the evolved satellite output
+- `SATGEN_CONC_SCATTER` -- additional scatter (in dex) to add to the concentration--mass relation: this should be zero for the Zhao+09 model, but nonzero for a Colossus model, as the merger tree will contain only the median concentration values.
 
-TreeGen.py: an example program for generating halo merger trees
+### Output processing
+This file contains scripts for processing individual orbit-evolved 
+files, or for processing entire directories at once. The functions 
+provided reduce the data to `numpy` structured arrays to make it 
+easier to use the output information.
 
-SatEvo.py: an example program for evolving satellite galaxies after 
-generating merger trees with TreeGen.py 
+The `read_file` function here may be of particular interest, as it
+shows how one might extract data of interest from the output files.
 
-- Dependent libraries and packages
-
-numpy, scipy, cosmolopy
-
-We recommend using python installations from Enthought or Conda. 
-
-- Basic usage
-
-SatGen builds upon density-profile classes and an orbit class, as 
-implemented in profiles.py and orbit.py. Apart from SatGen's main purpose 
-of generating satellite galaxies in a cosmological setup, these 
-two modules are useful for simpler studies that involve halo profiles 
-(e.g, Jeans modeling) and orbit integration within spherical or 
-axisymmetric potential wells. Here we walk through the basic usage of 
-profiles.py and orbit.py. 
- 
-To initialize a halo, for example, we can do
-
-`[]: from profiles import NFW,Dekel,Einasto`
-
-`[]: h = NFW(1e12, 10, Delta=200., z=0.)`
-
-This defines a halo object "h" following an NFW profile of a virial mass 
-of <img src="https://render.githubusercontent.com/render/math?math=M_\mathrm{vir}=10^{12}\M_\odot"> 
-and a concentration of 10, where a halo is defined as spherical enclosure 
-of 200 times the critical density of the Universe at redshift 0. (Note 
-that since the profiles module internally imports the cosmo module, if it 
-is the first time of importing profiles, it takes a few seconds to 
-initialize cosmology-related stuff.)
-
-With the halo object defined, one can easily evaluate, at radius 
-<img src="https://render.githubusercontent.com/render/math?math=r"> 
-[kpc], the density <img src="https://render.githubusercontent.com/render/math?math=\rho(r)"> 
-[<img src="https://render.githubusercontent.com/render/math?math=M_\odot\mathrm{kpc}^{-3}"> ], 
-the enclosed mass <img src="https://render.githubusercontent.com/render/math?math=M(r)"> 
-[<img src="https://render.githubusercontent.com/render/math?math=M_\odot"> ], 
-the gravitational potential <img src="https://render.githubusercontent.com/render/math?math=\Phi(r)"> 
-[<img src="https://render.githubusercontent.com/render/math?math=(\mathrm{kpc/Gyr})^2">], 
-the circular velocity <img src="https://render.githubusercontent.com/render/math?math=V_\mathrm{circ}(r)">
-[kpc/Gyr],
-the 1D velocity dispersion <img src="https://render.githubusercontent.com/render/math?math=\sigma(r)">
-[kpc/Gyr]
-(under the assumption of isotropic velocity 
-distributino), etc, by accessing the corresponding attribute or 
-method. For example:
- 
-`[]: h.M(10.)`
-
-returns the halo mass within a radius of 10 kpc; and
-
-`[]: h.rmax`
-
-gives the radius [kpc] at which the circular velocity reaches the maximum.   
-
-To initialize a disk potential:
-
-`[]: from profiles import MN`
-
-`[]: d = MN(10**10.7, 6.5, 0.25)`
-
-This defines a disc object "d" following a Miyamoto-Nagai profile of mass 
-<img src="https://render.githubusercontent.com/render/math?math=M_{\rm d}=10^{10.7}\M_\odot"> 
-with a scale radius of 
-<img src="https://render.githubusercontent.com/render/math?math=a=6.5"> kpc 
-and a scale height of 
-<img src="https://render.githubusercontent.com/render/math?math=b=0.25"> kpc. 
-
-Similarly, one can evaluates various quantities by accessing the 
-attributes and mothods of the disk object "d". For example,
-
-`[]: d.Phi(8.,z=0.)`
-
-returns the gravitational potential at the cylindrical coordinate 
-<img src="https://render.githubusercontent.com/render/math?math=(R,z)=(8,0)">.
-
-One can make a composite potential simply by creating a list, e.g., 
-
-`[]: p = [h,d]`
-
-This creates a composite potential consisting of the NFW halo and the 
-MN disk defined above. The properties of the composite potential 
-can also be evaluated easily. For example, if we want to get the circular 
-velocity profile, we can do:
-
-`[]: import numpy as np`
-
-`[]: R = np.logspace(-3,0,100)`
-
-`[]: Vcirc(p,R,z=0.)`
-
-Let's say, we now want to integrate the orbit of a point mass
-<img src="https://render.githubusercontent.com/render/math?math=m"> in
-this composite potential "p". To do this, first, we initialize the orbit, 
-by specifying the initial 6D phase-space coordinate "xv" in the 
-cylindrical frame (a list or an numpy array), xv = 
-<img src="https://render.githubusercontent.com/render/math?math=[R,\phi,z,V_R,V_\phi,V_z]"> 
-[kpc, radian, kpc, kpc/Gyr, kpc/Gyr, kpc/Gyr] --
-
-`[]: import orbit as orb`
-
-`[]: o = orb.orbit(xv)`
-
-This gives us an orbit object "o". Then, orbit integration can be done 
-by calling the o.integrate method:
-
-`[]: o.integrate(t,p)`
-
-This integrates the orbit for time "t" [Gyr] (float or array) in the 
-potential well "p", without considering dynamical friction. If instead 
-we want to consider dynamical friction, we simply add the test-object's 
-mass "m" as a third parameter when calling the o.integrate function, i.e., 
-
-`[]: o.integrate(t,p,m)`
-
-After the orbit integration, we can access the instantaneous 6D 
-coordinate simply by
-
-`[]: o.xv`
-
-and access the time elapsed since the initial position by
-
-`[]: o.t`
-
-If the "t" used in "o.integrate(t,p,m)" is an array, the full orbit can 
-be accessed by
-
-`[]:o.xvArray`
-
-Moving on to a more realistic exercise, we recommend interested readers 
-to follow the program test_evolve.py. This is an example of 
-evolving a satellite galaxy in a static host potential. In addition to
-halo profiles and orbit integration described above, this example 
-also considers tidal stripping, tidal heating, and ram-pressure 
-stripping, and thus serves as a good walk-through different modules
-(profiles.py, orbit.py, galhalo.py, init.py, and evolve.py). 
-
-- Advanced usage
-
-For full cosmological applications, TreeGen.py and SatEvo.py constitute a 
-complete set of exercises. TreeGen.py generates EPS merger trees and 
-initializes satellites at the first virial-crossing. SatEvo.py evolves 
-the satellites. Examples that utilize some of the updates to the model
-introduced in Green et al. (2021a) and Green et al. (2021b) for 
-dark matter-only systems are shown in TreeGen_Sub.py and SubEvo.py
-
-These programs are process-based parallelized using python's 
-multiprocessing library. 
-
-SatGen has detailed docstrings, and all the example programs are designed 
-to be self-explanatory. Please feel free to contact the authors 
-Fangzhou Jiang (fzjiang@caltech.edu) and Sheridan Green 
-(sheridan.green@yale.edu), if you have any question. 
+These scripts are not as well-documented as the SatGen modules,
+but they are written to be somewhat self-explanatory.
