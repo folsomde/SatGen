@@ -50,7 +50,7 @@ SMHMR = os.getenv('SATGEN_SMHMR', 'RP17')
 conctype = os.getenv('SATGEN_CONC', 'diemer19')
 
 #---for output
-outdir = os.getenv('SATGEN_TREES', f'/global/scratch/projects/pc_heptheory/dfolsom/TREES_Green_m{lgM0}res{lgMres}/')
+outdir = os.getenv('SATGEN_TREES', f'TREES_Green_m{lgM0}res{lgMres}/')
 outfile = outdir + f'tree{{itree:0{len(str(Ntree))}d}}.npz'
 
 ############################### compute #################################
@@ -181,7 +181,7 @@ def loop(itree):
             c2 = np.array([colco.concentration(M=this_m, mdef='vir', z=this_z, model=conctype) 
                            for this_m, this_z in zip(Msample, zsample)])
         
-        Mstar = init.Mstar(Msample, zsample) # DF
+        Mstar = init.Mstar(Msample, zsample, choice=SMHMR) # DF
         
         # use the redshift id and parent-branch id to access the parent
         # branch's information at our current branch's accretion epoch,
