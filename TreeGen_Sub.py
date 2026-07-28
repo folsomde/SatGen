@@ -18,52 +18,64 @@ import cosmo as co
 import init
 from profiles import NFW
 import aux
+from astropy import coordinates as crd, units as u
 
 #---python modules
 import numpy as np
 import time 
 from multiprocessing import Pool, cpu_count
 import sys
-from os import path
+import os
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning) 
+import logging
+logging.basicConfig(format='%(asctime)s | %(name)s %(levelname)s: %(message)s', datefmt='%H:%M:%S')
+log = logging.getLogger('init')
+
+from colossus.cosmology import cosmology
+cosmology.setCosmology('SatGen', flat=True, H0=cfg.h * 100, Om0=cfg.Om, Ob0=cfg.Ob, sigma8=cfg.s8, ns=cfg.ns)
+from colossus.halo import concentration as colco
 
 ############################# user control ##############################
 
 #---target halo and desired resolution 
-lgM0 = 14.2 - np.log10(cfg.h) # log10(Msun), corresponds to 10^14.2 Msun/h
-cfg.psi_res = 10**-5.0
+lgM0 = 12
+lgMres = 8
+cfg.psi_res = 10**(lgM0 - lgMres - 0.5)
 z0 = 0.
-lgMres = lgM0 + np.log10(cfg.psi_res) # psi_{res} = 10^-5 by default
-Ntree = 2000
 
-#---orbital parameter sampler preference
-optype =  'zzli' # 'zzli' or 'zentner' or 'jiang'
-
-#---concentration model preference
-conctype = 'zhao' # 'zhao' or 'vdb'
+Ntree = int(os.getenv('SATGEN_NUM_TREES', 10000))
+optype = os.getenv('SATGEN_ORBIT_SAMPLER', "zzli")
+SMHMR = os.getenv('SATGEN_SMHMR', 'RP17')
+conctype = os.getenv('SATGEN_CONC', 'diemer19')
 
 #---for output
-outfile1 = './OUTPUT_TREE/tree%i_lgM%.2f.npz' #%(itree,lgM0)
+outdir = os.getenv('SATGEN_TREES', f'/global/scratch/projects/pc_heptheory/dfolsom/TREES_Green_m{lgM0}res{lgMres}/')
+outfile = outdir + f'tree{{itree:0{len(str(Ntree))}d}}.npz'
 
 ############################### compute #################################
 
-print('>>> Generating %i trees for log(M_0)=%.2f at log(M_res)=%.2f...'%\
-    (Ntree,lgM0,lgMres))
 
 #---
-time_start = time.time()
 #for itree in range(Ntree):
 def loop(itree): 
     """
     Replaces the loop "for itree in range(Ntree):", for parallelization.
     """
 
+    this_outfile = outfile.format(itree=itree, lgMres=lgMres, lgM0=lgM0)
+    log = logging.getLogger(os.path.basename(this_outfile)[:-4])
+    log.setLevel("INFO")
     # check if this one has already been ran
-    if path.exists(outfile1%(itree,lgM0)):
+    if os.path.isfile(this_outfile):
+        # log.info('exists already, skipping')
         return
+    else:
+        log.info('initializing...')
 
     time_start_tmp = time.time()
     
-    np.random.seed() # [important!] reseed the random number generator
+    np.random.seed(itree) # [important!] reseed the random number generator
     
     cfg.M0 = 10.**lgM0
     cfg.z0 = z0
@@ -91,6 +103,7 @@ def loop(itree):
     
     VirialRadius = np.zeros((cfg.Nmax,cfg.Nz),np.float32) - 99.
     concentration = np.zeros((cfg.Nmax,cfg.Nz),np.float32) - 99.
+    StellarMass = np.zeros((cfg.Nmax,cfg.Nz),np.float32) - 99. # DF
                                                         
     coordinates = np.zeros((cfg.Nmax,cfg.Nz,6),np.float32)
     
@@ -109,19 +122,17 @@ def loop(itree):
         id = idk[ik]    # branch id
         ip = ipk[ik]    # parent id
         
-        while cfg.M0>cfg.Mmin:
-        
-            if cfg.M0>cfg.Mres: zleaf = cfg.z0 # update leaf redshift
-        
+        while cfg.z0 <= cfg.zmax:
+                
             co.UpdateGlobalVariables(**cfg.cosmo)
             M1,M2,Np = co.DrawProgenitors(**cfg.cosmo)
             
             # update descendent halo mass and descendent redshift 
             cfg.M0 = M1
             cfg.z0 = cfg.zW_interp(cfg.W0+cfg.dW)
-            if cfg.z0>cfg.zmax: break
             
-            if Np>1 and cfg.M0>cfg.Mres: # register next-level branches
+            # EPS gives a child above mass resolution which is accreted more recently than the earliest timestep
+            if Np>1 and M2>cfg.Mres and cfg.z0 <= cfg.zsample.max(): 
             
                 Mak_tmp.append(M2)
                 zak_tmp.append(cfg.z0)
@@ -147,27 +158,30 @@ def loop(itree):
             iz = np.array([iz]) # avoids error in loop below
             zsample = np.array([zsample])
             Msample = np.array([Msample])
-        izleaf = aux.FindNearestIndex(cfg.zsample,zleaf)
         # Note: zsample[j] is same as cfg.zsample[iz[j]]
+
+        if conctype == 'zhao':
+            # compute halo structure throughout time on the coarse grid, up
+            # to the leaf point
+            t = co.t(z,cfg.h,cfg.Om,cfg.OL)
+            c2,Rv = [],[]
+            assert np.all(z.max() >= cfg.zsample[iz]) # ensure fine grid has pre-snapshot information, required for c2
+            for i in iz:
+                msk = z>=cfg.zsample[i]
+                c2i=init.c2_fromMAH(M[msk],t[msk],conctype)
+                Rvi = init.Rvir(M[msk][0],Delta=cfg.Dvsample[i], z=cfg.zsample[i])
+                c2.append(c2i)
+                Rv.append(Rvi)
+                #print('    i=%6i,ci=%8.2f,ai=%8.2f,log(Msi)=%8.2f,c2i=%8.2f'%\
+                #    (i,ci,ai,np.log10(Msi),c2i)) # <<< for test
+            c2 = np.array(c2) 
+            Rv = np.array(Rv)
+        else:
+            Rv = init.Rvir(Msample, co.DeltaBN(zsample), zsample)
+            c2 = np.array([colco.concentration(M=this_m, mdef='vir', z=this_z, model=conctype) 
+                           for this_m, this_z in zip(Msample, zsample)])
         
-        # compute halo structure throughout time on the coarse grid, up
-        # to the leaf point
-        t = co.t(z,cfg.h,cfg.Om,cfg.OL)
-        c2,Rv = [],[]
-        for i in iz:
-            if i > (izleaf+1): break # only compute structure below leaf
-            msk = z>=cfg.zsample[i]
-            if True not in msk: break # safety
-            c2i=init.c2_fromMAH(M[msk],t[msk],conctype)
-            Rvi = init.Rvir(M[msk][0],Delta=cfg.Dvsample[i], z=cfg.zsample[i])
-            c2.append(c2i)
-            Rv.append(Rvi)
-            #print('    i=%6i,ci=%8.2f,ai=%8.2f,log(Msi)=%8.2f,c2i=%8.2f'%\
-            #    (i,ci,ai,np.log10(Msi),c2i)) # <<< for test
-        c2 = np.array(c2) 
-        Rv = np.array(Rv)
-        Nc = len(c2) # length of a branch over which c2 is computed 
-        
+        Mstar = init.Mstar(Msample, zsample) # DF
         
         # use the redshift id and parent-branch id to access the parent
         # branch's information at our current branch's accretion epoch,
@@ -197,10 +211,30 @@ def loop(itree):
         order[id,iz] = k
         ParentID[id,iz] = ip
         
-        VirialRadius[id,iz[0]:iz[0]+Nc] = Rv
-        concentration[id,iz[0]:iz[0]+Nc] = c2
+        VirialRadius[id,iz] = Rv
+        concentration[id,iz] = c2
+        StellarMass[id, iz] = Mstar # DF
         
-        coordinates[id,iz[0],:] = xv
+        # create skycoord for initial xv
+        coords = crd.CylindricalRepresentation(*(xv[:3] * [u.kpc, u.rad, u.kpc]), 
+                                               crd.CylindricalDifferential(*(xv[3:]/[1, np.hypot(*xv[:3:2]), 1] * \
+                                                                             [u.kpc/u.Gyr, u.rad/u.Gyr, u.kpc/u.Gyr])))
+        skcrd = crd.SkyCoord(coords, frame='galactocentric')
+
+        # x(t) = x0 + vt 
+        times = co.t(zsample,cfg.h,cfg.Om,cfg.OL) * u.Gyr
+        times -= times[0]
+        newxyz = skcrd.cartesian.xyz[:, np.newaxis] + (skcrd.velocity.d_xyz[:, np.newaxis] * times)
+        # create new skycoord to get cylindrical representation
+        newskcrd = crd.SkyCoord(crd.CartesianRepresentation(newxyz, differentials=skcrd.velocity * np.ones(len(times))), frame='galactocentric')
+        newskcrd.set_representation_cls('cylindrical')
+        xvt = np.array([
+               newskcrd.rho.to(u.kpc).value, newskcrd.phi.to(u.rad).value, newskcrd.z.to(u.kpc).value,
+               newskcrd.d_rho.to(u.kpc/u.Gyr).value, 
+               (np.linalg.norm(newxyz, axis = 0) * newskcrd.d_phi).to(u.kpc * u.rad/u.Gyr).value, 
+               newskcrd.d_z.to(u.kpc/u.Gyr).value, 
+              ])
+        coordinates[id, iz] = xvt.T
                 
         # Check if all the level-k branches have been dealt with: if so, 
         # i.e., if ik==Nk, proceed to the next level.
@@ -220,17 +254,20 @@ def loop(itree):
                 break # jump out of "while True" if no next-level branch 
             k += 1 # update level
     
+    log.info(f'saving to {this_outfile}')
     # trim and output 
     mass = mass[:id+1,:]
     order = order[:id+1,:]
     ParentID = ParentID[:id+1,:]
     VirialRadius = VirialRadius[:id+1,:]
     concentration = concentration[:id+1,:]
+    StellarMass = StellarMass[:id+1,:] # DF
     coordinates = coordinates[:id+1,:,:]
-    np.savez(outfile1%(itree,lgM0), 
+    np.savez(this_outfile, 
         redshift = cfg.zsample,
         CosmicTime = cfg.tsample,
         mass = mass,
+        StellarMass = StellarMass, # DF
         order = order,
         ParentID = ParentID,
         VirialRadius = VirialRadius,
@@ -239,13 +276,23 @@ def loop(itree):
         )
             
     time_end_tmp = time.time()
-    print('    Tree %5i: %6i branches, %2i order, %8.1f sec'\
-        %(itree,Nbranch,k,time_end_tmp-time_start_tmp))
+    log.info(f'{Nbranch} branches, {k} order, {time_end_tmp-time_start_tmp:0.0f} sec')
 
 if __name__ == "__main__":
-    Ncores = int(sys.argv[1])
-    pool = Pool(Ncores) # use as many as requested
-    pool.map(loop, range(Ntree), chunksize=1)
+    if not os.path.exists(outdir):
+        log.info(f'creating {outdir}')
+        os.mkdir(outdir)
 
-time_end = time.time() 
-print('    total time: %5.2f hours'%((time_end - time_start)/3600.))
+    log.warning(f'>>> Generating {Ntree} trees with log(M_0)={lgM0:0.2f} at log(M_res)={lgMres:0.2f}. {conctype = }')
+    log.warning(f'Writing to {outdir}')
+    Ncores = int(os.getenv('OMP_NUM_THREADS', cpu_count()))
+    log.warning(f'Running loop with {Ncores = }')
+    pool = Pool(Ncores) # use as many as requested
+    time_start = time.time()
+    with Pool(Ncores) as pool:
+        pool.map(loop, reversed(range(Ntree)), chunksize=1)
+        # pool.map(loop, range(Ntree), chunksize=1)
+        # pool.map(loop, np.random.permutation(range(Ntree)), chunksize=1)
+
+    time_end = time.time() 
+    print(f'    total time: {(time_end - time_start)/3600.:0.2f} hours')
