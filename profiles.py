@@ -2695,6 +2695,8 @@ class Green(object):
         self.rh = (3.*self.Minit / (cfg.FourPi*self.rhoh))**(1./3.)
         self.rs = self.rh / self.ch
         self.rmax = self.rs * 2.163
+        self.rmax_i = self.rs * 2.163
+        self.Vmax_i = self.Vcirc(self.rmax_i)
         self.sigma0 = np.sqrt(cfg.G * self.Minit / self.rh)
         #
         # attributes repeatedly used by following methods
@@ -2861,7 +2863,12 @@ class Green(object):
 
         # compute mass given f_b, c on each of the two planes in r
         val1 = interp[ind_low](self.log10fb, self.log10ch)
-        val2 = interp[ind_high](self.log10fb, self.log10ch)
+        # val2 = interp[ind_high](self.log10fb, self.log10ch)
+        try:
+            val2 = interp[ind_high](self.log10fb, self.log10ch)
+        except IndexError:
+            print(f'{ind_high = } for {r_by_rvir = }')
+            raise
 
         # linearly interpolate between the two planes
         val = val1 + (val2 - val1) * (r_by_rvir - cfg.r_vals_int[ind_low]) / (cfg.r_vals_int[ind_high] - cfg.r_vals_int[ind_low])
